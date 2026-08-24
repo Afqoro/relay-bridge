@@ -1,0 +1,20 @@
+# binaries
+relay-bridge
+*.exe
+
+# build output
+/dist/
+/build/
+
+# vendored deps
+/vendor/
+
+# logs & runtime
+*.log
+nohup.out
+*.lock
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
