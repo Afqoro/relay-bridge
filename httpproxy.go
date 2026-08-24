@@ -14,6 +14,15 @@ type httpProxyHandler struct {
 }
 
 func (h *httpProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Health / readiness endpoint (used by local verifiers and monitors).
+	if (r.Method == http.MethodGet || r.Method == http.MethodHead) &&
+		(r.URL.Path == "/" || r.URL.Path == "/health" || r.URL.Path == "/healthz") {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok","service":"relay-bridge"}`))
+		return
+	}
+
 	if r.Method == http.MethodConnect {
 		h.handleConnect(w, r)
 		return

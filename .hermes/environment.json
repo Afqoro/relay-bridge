@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "recipe": {
+    "name": "Go project",
+    "kind": "go",
+    "bootstrap": [],
+    "build": [
+      "go build ./..."
+    ],
+    "test": [
+      "go test ./..."
+    ],
+    "start": "go run . -relay https://relay-deployer-auah2-ar88po5k4-auah-s-projects.vercel.app -http 127.0.0.1:8080 -socks \"\"",
+    "port": 8080,
+    "readinessPath": "/",
+    "evidence": [
+      "Detected go.mod"
+    ]
+  },
+  "updatedAt": "2026-08-24T14:53:09.399938+00:00"
+}

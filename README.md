@@ -12,6 +12,7 @@ Relay itu sendiri adalah *catch-all HTTP relay*: kamu kirim request apa pun ke s
 | SOCKS5 CONNECT ke target **HTTP** (port 80) | `-socks` | ✅ |
 | CONNECT (HTTP proxy) ke port 80 | `-http` | ✅ |
 | Streaming / SSE / chunked | — | ✅ (passthrough, `x-accel-buffering: no`) |
+| Health / readiness (`/`, `/health`) | `-http` | ✅ (JSON `{"status":"ok"}`) |
 | HTTPS browsing biasa (CONNECT ke 443) | — | ❌ tidak didukung (relay HTTP-only, tanpa tunnel TCP mentah) |
 
 > **Batas teknis utama:** relay berjalan sebagai fungsi serverless Vercel yang **hanya HTTP** (request/response) — ia tidak bisa membawa tunnel TCP mentah. Karena itu:
@@ -81,6 +82,15 @@ curl -sS -x http://127.0.0.1:8080 http://httpbin.org/get            # -> JSON (h
 curl -sS --socks5-hostname 127.0.0.1:1080 http://httpbin.org/get   # -> JSON (socks, http)
 curl -sS -x http://127.0.0.1:8080 https://httpbin.org/get          # -> 502 CONNECT not supported (limitation)
 ```
+
+## Verifikasi
+
+```bash
+go vet ./... && go build -o relay-bridge .
+hermes verify --json   # build -> test -> boot -> readiness poll (health /)
+```
+
+HTTP proxy mengekspos endpoint health `GET /` dan `GET /health` yang membalas `{"status":"ok"}` — dipakai untuk readiness poll verifier/monitor.
 
 ## Pitfalls
 
