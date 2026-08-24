@@ -15,7 +15,10 @@ type httpProxyHandler struct {
 
 func (h *httpProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Health / readiness endpoint (used by local verifiers and monitors).
+	// Only triggers for origin-form requests (NOT absolute-form proxy requests,
+	// which also have a "/" path and must be proxied, not answered here).
 	if (r.Method == http.MethodGet || r.Method == http.MethodHead) &&
+		!r.URL.IsAbs() &&
 		(r.URL.Path == "/" || r.URL.Path == "/health" || r.URL.Path == "/healthz") {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
