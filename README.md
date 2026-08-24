@@ -15,6 +15,8 @@ Relay itu sendiri adalah *catch-all HTTP relay*: kamu kirim request apa pun ke s
 | Health / readiness (`/`, `/health`) | `-http` | ✅ (JSON `{"status":"ok"}`) |
 | HTTPS browsing biasa (CONNECT ke 443) | — | ❌ tidak didukung (relay HTTP-only, tanpa tunnel TCP mentah) |
 
+> **Untuk browser:** relay ini HANYA bisa dipakai untuk situs **http://** (baik via `-http` maupun `-socks`). Situs **https://** TIDAK akan termuat di browser karena browser selalu membuat tunnel `CONNECT ...:443` untuk HTTPS, dan relay HTTP-only tidak bisa membawa tunnel TCP mentah (proxy balas 502). Tes nyata: `curl -x http://127.0.0.1:8080 http://example.com/` → 200 HTML asli; `curl -x http://127.0.0.1:8080 https://example.com` → `CONNECT tunnel failed, response 502`.
+
 > **Batas teknis utama:** relay berjalan sebagai fungsi serverless Vercel yang **hanya HTTP** (request/response) — ia tidak bisa membawa tunnel TCP mentah. Karena itu:
 > - `CONNECT`/SOCKS5 ke **port 443 (HTTPS)** dan protokol non-HTTP tidak bisa di-tunnel: proxy menolak dengan bersih (502 / SOCKS5 `command not supported`). Tidak ada MITM TLS yang dibangun di sini.
 > - HTTPS tetap bisa diakses lewat **absolute-form** (`GET https://host/path HTTP/1.1` ke proxy) karena relay men-fetch TLS-nya sendiri di server.
