@@ -16,17 +16,17 @@ import (
 //
 // Auth method: no-auth (0x00) only.
 
-func serveSOCKS5(l net.Listener, relay *Relay) {
+func serveSOCKS5(l net.Listener, pool *RelayPool) {
 	for {
 		conn, err := l.Accept()
 		if err != nil {
 			return
 		}
-		go handleSOCKS5(conn, relay)
+		go handleSOCKS5(conn, pool)
 	}
 }
 
-func handleSOCKS5(conn net.Conn, relay *Relay) {
+func handleSOCKS5(conn net.Conn, pool *RelayPool) {
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(2 * time.Minute))
 	br := bufio.NewReader(conn)
@@ -73,7 +73,7 @@ func handleSOCKS5(conn net.Conn, relay *Relay) {
 		return
 	}
 	_ = conn.SetDeadline(time.Now().Add(5 * time.Minute))
-	serveHTTPOverConn(conn, host, "http", relay)
+	serveHTTPOverConn(conn, host, "http", pool)
 }
 
 func socksReadGreeting(br *bufio.Reader) error {

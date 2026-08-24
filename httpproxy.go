@@ -13,8 +13,8 @@ import (
 // relay as an absolute-form https URL; otherwise only HTTP (port 80) can be
 // bridged because the remote relay is HTTP-only and cannot carry raw TCP.
 type httpProxyHandler struct {
-	relay *Relay
-	mitm  *MITM // nil when -mitm is disabled
+	pool *RelayPool
+	mitm *MITM // nil when -mitm is disabled
 }
 
 func (h *httpProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -54,7 +54,7 @@ func (h *httpProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if targetPath == "" {
 			targetPath = "/"
 		}
-		h.relay.Forward(w, r, scheme, host, targetPath)
+		h.pool.Forward(w, r, scheme, host, targetPath)
 		return
 	}
 
@@ -105,7 +105,7 @@ func (h *httpProxyHandler) handleConnect(w http.ResponseWriter, r *http.Request)
 		conn.Close()
 		return
 	}
-	serveHTTPOverConn(conn, host, "http", h.relay)
+	serveHTTPOverConn(conn, host, "http", h.pool)
 }
 
 // serveMITM answers CONNECT :443 with a 200, then terminates the client's TLS
@@ -138,5 +138,5 @@ func (h *httpProxyHandler) serveMITM(w http.ResponseWriter, host string) {
 	}
 	// Decrypted traffic now flows over tlsConn; forward each HTTP request to the
 	// relay as an https absolute-form target. Responses are re-encrypted by TLS.
-	serveHTTPOverConn(tlsConn, host, "https", h.relay)
+	serveHTTPOverConn(tlsConn, host, "https", h.pool)
 }

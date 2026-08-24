@@ -1,0 +1,102 @@
+package main
+
+import (
+	"io"
+	"log"
+	"net/http"
+	"strings"
+	"sync/atomic"
+)
+
+// RelayPool is a set of relays of a single type (vercel OR cloudflare — never
+// both mixed). Incoming requests are round-robined across the relays, and a
+// transport failure on one relay falls over to the next.
+type RelayPool struct {
+	relays []*Relay
+	rr     atomic.Uint64
+}
+
+// NewPool builds a pool from relay base URLs. Empty entries are skipped.
+func NewPool(bases []string) *RelayPool {
+	return NewPoolWithSecret(bases, "")
+}
+
+// NewPoolWithSecret builds a pool from relay base URLs, attaching the secret to
+// every relay. Empty entries are skipped.
+func NewPoolWithSecret(bases []string, secret string) *RelayPool {
+	p := &RelayPool{}
+	for _, b := range bases {
+		b = strings.TrimSpace(b)
+		if b == "" {
+			continue
+		}
+		p.relays = append(p.relays, NewRelay(b, secret))
+	}
+	return p
+}
+
+// Size returns the number of relays in the pool.
+func (p *RelayPool) Size() int { return len(p.relays) }
+
+// Bases returns the relay base URLs, for logging/status.
+func (p *RelayPool) Bases() []string {
+	out := make([]string, len(p.relays))
+	for i, r := range p.relays {
+		out[i] = r.Base
+	}
+	return out
+}
+
+// Forward relays one client request through the pool. Only GET and HEAD are
+// relayed: the serverless relay endpoints only route GET/HEAD (POST returns a
+// 405 with `allow: HEAD, GET, OPTIONS`). Other methods are rejected up front
+// with a clear 405 instead of a confusing relay outage. On a transport error the
+// next relay is tried (round-robin + failover).
+func (p *RelayPool) Forward(w http.ResponseWriter, clientReq *http.Request, scheme, host, targetPath string) {
+	if len(p.relays) == 0 {
+		http.Error(w, "relay-bridge: no relays configured", http.StatusBadGateway)
+		return
+	}
+	if clientReq.Method != http.MethodGet && clientReq.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		http.Error(w, "relay-bridge: relay only forwards GET/HEAD, not "+clientReq.Method, http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Buffer the body (empty for GET/HEAD) once so it can be re-sent unchanged
+	// on failover.
+	var body []byte
+	var err error
+	if clientReq.Body != nil {
+		body, err = io.ReadAll(clientReq.Body)
+		_ = clientReq.Body.Close()
+		if err != nil {
+			http.Error(w, "relay-bridge: read request body: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+
+	n := p.rr.Add(1) - 1
+	start := int(n % uint64(len(p.relays)))
+	var lastErr error
+	for i := 0; i < len(p.relays); i++ {
+		r := p.relays[(start+i)%len(p.relays)]
+		if verbose {
+			log.Printf("relay: %s <- %s %s://%s%s", r.Base, clientReq.Method, scheme, host, targetPath)
+		}
+		resp, err := r.roundTrip(clientReq.Context(), clientReq.Method, body, clientReq.Header, scheme, host, targetPath)
+		if err != nil {
+			if verbose {
+				log.Printf("relay: %s failed (%v), trying next", r.Base, err)
+			}
+			lastErr = err
+			continue
+		}
+		defer resp.Body.Close()
+		copyHeaders(w.Header(), resp.Header)
+		w.WriteHeader(resp.StatusCode)
+		flushCopy(w, resp.Body)
+		return
+	}
+	http.Error(w, "relay-bridge: all relays failed: "+lastErr.Error(), http.StatusBadGateway)
+}

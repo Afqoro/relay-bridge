@@ -19,6 +19,11 @@ relay-bridge
 nohup.out
 *.lock
 
+# env (copy .env.example; the real .env must not be committed)
+.env
+.env.*
+!.env.example
+
 # OS / editor
 .DS_Store
 .idea/

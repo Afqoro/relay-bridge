@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -68,12 +69,12 @@ func NewRelay(base, secret string) *Relay {
 				return http.ErrUseLastResponse
 			},
 			Transport: &http.Transport{
-				Proxy:                  nil, // never route through env proxy
-				DisableCompression:     true, // pass origin content-encoding through as-is
-				MaxIdleConnsPerHost:    100,
-				IdleConnTimeout:        90 * time.Second,
-				ResponseHeaderTimeout:  60 * time.Second,
-				TLSHandshakeTimeout:    20 * time.Second,
+				Proxy:                 nil,  // never route through env proxy
+				DisableCompression:    true, // pass origin content-encoding through as-is
+				MaxIdleConnsPerHost:   100,
+				IdleConnTimeout:       90 * time.Second,
+				ResponseHeaderTimeout: 60 * time.Second,
+				TLSHandshakeTimeout:   20 * time.Second,
 			},
 		},
 	}
@@ -84,31 +85,18 @@ func NewRelay(base, secret string) *Relay {
 //
 // If w also implements http.Flusher (the normal server case), the body is
 // streamed/flushed; a rawResponseWriter buffers it entirely instead.
-func (r *Relay) Forward(w http.ResponseWriter, clientReq *http.Request, scheme, host, targetPath string) {
-	// Read the body up front so we can set an accurate Content-Length on the
-	// request we send to the relay. Serverless relays are HTTP request/response
-	// only, so buffering a body is acceptable.
-	var body []byte
-	var err error
-	if clientReq.Body != nil {
-		body, err = io.ReadAll(clientReq.Body)
-		if cerr := clientReq.Body.Close(); cerr != nil && err == nil {
-			err = cerr
-		}
-		if err != nil {
-			http.Error(w, "relay-bridge: read request body: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-	}
-
+// roundTrip sends one request to the relay for the given method/body/header and
+// target and returns the origin's response. It does NOT write to w, so a caller
+// (RelayPool) can retry on a transport error. body must be fully buffered by the
+// caller so it can be re-sent unchanged on failover.
+func (r *Relay) roundTrip(ctx context.Context, method string, body []byte, header http.Header, scheme, host, targetPath string) (*http.Response, error) {
 	relayURL := r.Base + "/relay"
-	out, err := http.NewRequestWithContext(clientReq.Context(), clientReq.Method, relayURL, bytes.NewReader(body))
+	out, err := http.NewRequestWithContext(ctx, method, relayURL, bytes.NewReader(body))
 	if err != nil {
-		http.Error(w, "relay-bridge: build request: "+err.Error(), http.StatusInternalServerError)
-		return
+		return nil, err
 	}
 	out.ContentLength = int64(len(body))
-	copyHeaders(out.Header, clientReq.Header)
+	copyHeaders(out.Header, header)
 
 	// The relay control headers that define the real destination.
 	out.Header.Set("x-relay-target", scheme+"://"+host)
@@ -119,16 +107,7 @@ func (r *Relay) Forward(w http.ResponseWriter, clientReq *http.Request, scheme, 
 		out.Header.Set("x-relay-secret", r.Secret)
 	}
 
-	resp, err := r.Client.Do(out)
-	if err != nil {
-		http.Error(w, "relay-bridge: relay request failed: "+err.Error(), http.StatusBadGateway)
-		return
-	}
-	defer resp.Body.Close()
-
-	copyHeaders(w.Header(), resp.Header)
-	w.WriteHeader(resp.StatusCode)
-	flushCopy(w, resp.Body)
+	return r.Client.Do(out)
 }
 
 // flushCopy copies src to dst, flushing after each chunk so streaming responses
@@ -217,7 +196,7 @@ func (w *rawResponseWriter) finish() {
 // the origin, so requests arrive in origin-form with a Host header. Supports
 // keep-alive: the loop continues reading requests until the client closes or
 // sends Connection: close.
-func serveHTTPOverConn(conn net.Conn, host, scheme string, relay *Relay) {
+func serveHTTPOverConn(conn net.Conn, host, scheme string, pool *RelayPool) {
 	defer conn.Close()
 	br := bufio.NewReader(conn)
 	for {
@@ -236,7 +215,7 @@ func serveHTTPOverConn(conn net.Conn, host, scheme string, relay *Relay) {
 		}
 		_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Minute))
 		rw := &rawResponseWriter{conn: conn, close: req.Close}
-		relay.Forward(rw, req, scheme, req.URL.Host, targetPath)
+		pool.Forward(rw, req, scheme, req.URL.Host, targetPath)
 		rw.finish()
 		req.Body.Close()
 		if req.Close {
