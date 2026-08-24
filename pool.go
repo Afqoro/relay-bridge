@@ -47,24 +47,15 @@ func (p *RelayPool) Bases() []string {
 	return out
 }
 
-// Forward relays one client request through the pool. Only GET and HEAD are
-// relayed: the serverless relay endpoints only route GET/HEAD (POST returns a
-// 405 with `allow: HEAD, GET, OPTIONS`). Other methods are rejected up front
-// with a clear 405 instead of a confusing relay outage. On a transport error the
+// Forward relays one client request through the pool. On a transport error the
 // next relay is tried (round-robin + failover).
 func (p *RelayPool) Forward(w http.ResponseWriter, clientReq *http.Request, scheme, host, targetPath string) {
 	if len(p.relays) == 0 {
 		http.Error(w, "relay-bridge: no relays configured", http.StatusBadGateway)
 		return
 	}
-	if clientReq.Method != http.MethodGet && clientReq.Method != http.MethodHead {
-		w.Header().Set("Allow", "GET, HEAD")
-		http.Error(w, "relay-bridge: relay only forwards GET/HEAD, not "+clientReq.Method, http.StatusMethodNotAllowed)
-		return
-	}
 
-	// Buffer the body (empty for GET/HEAD) once so it can be re-sent unchanged
-	// on failover.
+	// Buffer the body once so it can be re-sent unchanged on failover.
 	var body []byte
 	var err error
 	if clientReq.Body != nil {

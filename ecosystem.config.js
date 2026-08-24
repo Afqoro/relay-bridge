@@ -22,10 +22,11 @@ module.exports = {
       autorestart: true,
       max_memory_restart: "150M",
       // -relay intentionally omitted so the pool is built from the env below.
-      args: "-http 127.0.0.1:8080 -socks 127.0.0.1:1080",
+      // NOTE: 8080 = singbox-nautica, 1080 = microsocks STB — jangan dipakai di sini.
+      args: "-http 127.0.0.1:8880 -socks 127.0.0.1:1180 -mitm -v",
       env: {
         // ---- select ONE type: "vercel" or "cloudflare" ----
-        RELAY_TYPE: "vercel",
+        RELAY_TYPE: "cloudflare",
 
         // Vercel relays (comma-separated)
         RELAY_VERCEL:
