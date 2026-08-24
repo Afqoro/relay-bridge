@@ -13,12 +13,14 @@ Relay itu sendiri adalah *catch-all HTTP relay*: kamu kirim request apa pun ke s
 | CONNECT (HTTP proxy) ke port 80 | `-http` | ✅ |
 | Streaming / SSE / chunked | — | ✅ (passthrough, `x-accel-buffering: no`) |
 | Health / readiness (`/`, `/health`) | `-http` | ✅ (JSON `{"status":"ok"}`) |
-| HTTPS browsing biasa (CONNECT ke 443) | — | ❌ tidak didukung (relay HTTP-only, tanpa tunnel TCP mentah) |
+| HTTPS browsing (CONNECT ke 443) | `-http` + `-mitm` | ✅ (MITM + CA di-trust di klien) |
+| HTTPS browsing tanpa `-mitm` | `-http` | ❌ (502; relay HTTP-only, tanpa tunnel TCP mentah) |
 
-> **Untuk browser:** relay ini HANYA bisa dipakai untuk situs **http://** (baik via `-http` maupun `-socks`). Situs **https://** TIDAK akan termuat di browser karena browser selalu membuat tunnel `CONNECT ...:443` untuk HTTPS, dan relay HTTP-only tidak bisa membawa tunnel TCP mentah (proxy balas 502). Tes nyata: `curl -x http://127.0.0.1:8080 http://example.com/` → 200 HTML asli; `curl -x http://127.0.0.1:8080 https://example.com` → `CONNECT tunnel failed, response 502`.
+> **Untuk browser:** relay ini bisa dipakai untuk situs **http://** (via `-http`/`-socks`) dan **https://** (via `-http` + `-mitm`, setelah CA di-trust di browser/OS). Tanpa `-mitm`, HTTPS tidak termuat karena browser membuat tunnel `CONNECT ...:443`, dan relay HTTP-only tidak bisa membawa tunnel TCP mentah (proxy balas 502). Tes nyata: `curl -x http://127.0.0.1:8080 http://example.com/` → 200 HTML; `curl -x http://127.0.0.1:8080 --cacert <ca> https://example.com` → 200 HTML.
 
 > **Batas teknis utama:** relay berjalan sebagai fungsi serverless Vercel yang **hanya HTTP** (request/response) — ia tidak bisa membawa tunnel TCP mentah. Karena itu:
-> - `CONNECT`/SOCKS5 ke **port 443 (HTTPS)** dan protokol non-HTTP tidak bisa di-tunnel: proxy menolak dengan bersih (502 / SOCKS5 `command not supported`). Tidak ada MITM TLS yang dibangun di sini.
+> - `CONNECT`/SOCKS5 ke **port 443 (HTTPS)** dan protokol non-HTTP tidak bisa di-tunnel **langsung**: tanpa `-mitm` proxy menolak (502 / SOCKS5 `command not supported`). Dengan `-mitm`, HTTPS ditangani lewat TLS-intercept (CA di-trust di klien).
+> - Protokol non-HTTP (SSH, FTP, WebSocket biner, dll.) tetap tidak bisa — hanya HTTP/HTTPS yang di-relay.
 > - HTTPS tetap bisa diakses lewat **absolute-form** (`GET https://host/path HTTP/1.1` ke proxy) karena relay men-fetch TLS-nya sendiri di server.
 
 ## Cara kerja
@@ -63,7 +65,32 @@ curl -x http://127.0.0.1:8080 -X POST http://httpbin.org/post -d '{"a":1}'
 
 # SOCKS5 (target HTTP)
 curl --socks5-hostname 127.0.0.1:1080 http://httpbin.org/get
+
+# HTTPS via browser (MITM): trust the CA first, then CONNECT is intercepted
+curl -x http://127.0.0.1:8080 --cacert ~/.relay-bridge/mitm-ca.crt https://example.com
 ```
+
+## Mode MITM (HTTPS untuk browser)
+
+Relay di sini HTTP-only (serverless), jadi `CONNECT :443` tidak bisa di-tunnel langsung. Mode `-mitm` menyelesaikannya dengan **mengakhiri TLS di sisi proxy** (MITM) lalu meneruskan request yang sudah didekripsi ke relay sebagai URL https absolute-form — relay men-fetch TLS-nya sendiri di server. Artinya proxy jadi titik TLS-intercept: semua HTTPS akan tampak terdekripsi di proxy, dan hanya aman jika kamu yang mengoperasikan & menyimpan CA-nya.
+
+**Langkah:**
+
+1. Jalankan dengan `-mitm`:
+   ```bash
+   ./relay-bridge -relay https://relay-...vercel.app -http 127.0.0.1:8080 -mitm
+   ```
+   Pada run pertama, CA dibuat di `~/.relay-bridge/mitm-ca.crt` (override dengan `-certs DIR`). Log menampilkan path + SHA-256 fingerprint CA.
+
+2. **Trust CA di browser/OS** yang akan browsing:
+   - Chrome/Edge (Windows/Linux): Settings → Privacy & security → Security → Manage certificates → Trusted Root Certification Authorities → Import `mitm-ca.crt`.
+   - Firefox: Settings → Privacy & Security → Certificates → View Certificates → Authorities → Import.
+   - macOS: Keychain Access → System Roots → import, lalu set "Always Trust".
+   - `curl`: pakai `--cacert ~/.relay-bridge/mitm-ca.crt`.
+
+3. Set proxy di browser/klien ke `http://127.0.0.1:8080` (atau host:port tempat bridge berjalan). Semua situs http & https kini mengalir lewat relay.
+
+> **Catatan CA:** CA disimpan di `-certs` (default `~/.relay-bridge`) dan **stabil** antar restart (jangan dihapus, atau browser akan gagal memverifikasi). Fingerprint ditampilkan di log startup — verifikasi sebelum mempercayai.
 
 ### Flags
 
@@ -73,6 +100,8 @@ curl --socks5-hostname 127.0.0.1:1080 http://httpbin.org/get
 | `-secret` | `""` (baca `$RELAY_SECRET`) | nilai `x-relay-secret` yang dikirim ke relay |
 | `-http` | `127.0.0.1:8080` | listen HTTP proxy; `""` untuk mematikan |
 | `-socks` | `127.0.0.1:1080` | listen SOCKS5; `""` untuk mematikan |
+| `-mitm` | `false` | aktifkan TLS-intercept HTTPS (perlu CA di-trust di klien) |
+| `-certs` | `~/.relay-bridge` | direktori CA MITM + cache leaf |
 
 ## Verifikasi cepat
 

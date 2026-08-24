@@ -2,6 +2,11 @@
 relay-bridge
 *.exe
 
+# MITM CA (private key must never be committed)
+.cert/
+**/mitm-ca.key
+**/mitm-ca.crt
+
 # build output
 /dist/
 /build/

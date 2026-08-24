@@ -163,6 +163,7 @@ type rawResponseWriter struct {
 	header      http.Header
 	status      int
 	wroteHeader bool
+	close       bool // honor client's Connection: close
 	body        bytes.Buffer
 }
 
@@ -196,7 +197,9 @@ func (w *rawResponseWriter) finish() {
 	w.header.Del("Transfer-Encoding")
 	w.header.Del("Content-Length")
 	w.header.Set("Content-Length", fmt.Sprintf("%d", w.body.Len()))
-	w.header.Set("Connection", "close")
+	if w.close {
+		w.header.Set("Connection", "close")
+	}
 	_, _ = fmt.Fprintf(w.conn, "HTTP/1.1 %d %s\r\n", w.status, http.StatusText(w.status))
 	for k, vs := range w.header {
 		for _, v := range vs {
@@ -207,31 +210,37 @@ func (w *rawResponseWriter) finish() {
 	_, _ = w.conn.Write(w.body.Bytes())
 }
 
-// serveHTTPOverConn reads a single origin-form HTTP request from a raw conn,
-// forwards it through the relay, and writes the response back. Used by the
-// CONNECT-to-HTTP path and SOCKS5 CONNECT to port 80. The client believes it is
-// talking directly to the origin, so requests arrive in origin-form with a Host
-// header. One request per connection (then close) — the robust, keep-alive-free
-// choice for serverless relays.
+// serveHTTPOverConn reads origin-form HTTP requests from a raw conn, forwards
+// each through the relay, and writes the responses back. Used by the
+// CONNECT-to-HTTP path and SOCKS5 CONNECT to port 80, and by the MITM path
+// (where conn is a tls.Server). The client believes it is talking directly to
+// the origin, so requests arrive in origin-form with a Host header. Supports
+// keep-alive: the loop continues reading requests until the client closes or
+// sends Connection: close.
 func serveHTTPOverConn(conn net.Conn, host, scheme string, relay *Relay) {
 	defer conn.Close()
-	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Minute))
 	br := bufio.NewReader(conn)
-	req, err := http.ReadRequest(br)
-	if err != nil {
-		return
+	for {
+		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Minute))
+		req, err := http.ReadRequest(br)
+		if err != nil {
+			return // EOF, client gone, or idle timeout
+		}
+		req.URL.Scheme = scheme
+		if req.URL.Host == "" {
+			req.URL.Host = host
+		}
+		targetPath := req.URL.RequestURI()
+		if targetPath == "" {
+			targetPath = "/"
+		}
+		_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Minute))
+		rw := &rawResponseWriter{conn: conn, close: req.Close}
+		relay.Forward(rw, req, scheme, req.URL.Host, targetPath)
+		rw.finish()
+		req.Body.Close()
+		if req.Close {
+			return
+		}
 	}
-	req.URL.Scheme = scheme
-	if req.URL.Host == "" {
-		req.URL.Host = host
-	}
-	targetPath := req.URL.RequestURI()
-	if targetPath == "" {
-		targetPath = "/"
-	}
-	_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Minute))
-	rw := &rawResponseWriter{conn: conn}
-	relay.Forward(rw, req, scheme, req.URL.Host, targetPath)
-	rw.finish()
-	req.Body.Close()
 }

@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 )
 
 func main() {
@@ -14,6 +15,8 @@ func main() {
 	secret := flag.String("secret", "", "optional x-relay-secret sent to the relay; also reads $RELAY_SECRET")
 	httpListen := flag.String("http", "127.0.0.1:8080", "HTTP proxy listen address (empty disables)")
 	socksListen := flag.String("socks", "127.0.0.1:1080", "SOCKS5 listen address (empty disables)")
+	mitm := flag.Bool("mitm", false, "enable MITM HTTPS interception so browsers can load https:// via the relay (trust the CA in the client first)")
+	certDir := flag.String("certs", "", "directory for the MITM CA + leaf cache (default ~/.relay-bridge)")
 	flag.Parse()
 
 	if *relayBase == "" {
@@ -23,7 +26,7 @@ func main() {
 		*secret = os.Getenv("RELAY_SECRET")
 	}
 	if *relayBase == "" {
-		fmt.Fprintln(os.Stderr, "usage: relay-bridge -relay https://relay-...vercel.app [-secret x] [-http :8080] [-socks :1080]")
+		fmt.Fprintln(os.Stderr, "usage: relay-bridge -relay https://relay-...vercel.app [-secret x] [-http :8080] [-socks :1080] [-mitm] [-certs DIR]")
 		os.Exit(2)
 	}
 	if *httpListen == "" && *socksListen == "" {
@@ -33,6 +36,21 @@ func main() {
 
 	relay := NewRelay(*relayBase, *secret)
 
+	var mitmObj *MITM
+	if *mitm {
+		dir := *certDir
+		if dir == "" {
+			dir = defaultCertDir()
+		}
+		var err error
+		mitmObj, err = NewMITM(dir, 0)
+		if err != nil {
+			log.Fatalf("mitm: %v", err)
+		}
+		log.Printf("MITM enabled. Trust this CA in your browser/OS: %s", mitmObj.CACertPath())
+		log.Printf("  CA SHA-256 fingerprint: %s", mitmObj.Fingerprint())
+	}
+
 	if *httpListen != "" {
 		ln, err := net.Listen("tcp", *httpListen)
 		if err != nil {
@@ -40,7 +58,7 @@ func main() {
 		}
 		go func() {
 			log.Printf("HTTP proxy listening on http://%s  ->  relay %s", *httpListen, *relayBase)
-			if err := http.Serve(ln, &httpProxyHandler{relay: relay}); err != nil {
+			if err := http.Serve(ln, &httpProxyHandler{relay: relay, mitm: mitmObj}); err != nil {
 				log.Fatalf("http: %v", err)
 			}
 		}()
@@ -59,4 +77,13 @@ func main() {
 
 	// block forever
 	select {}
+}
+
+// defaultCertDir returns the default directory for the MITM CA + leaf cache.
+func defaultCertDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ".relay-bridge"
+	}
+	return filepath.Join(home, ".relay-bridge")
 }
