@@ -23,6 +23,7 @@ func main() {
 	certDir := flag.String("certs", "", "directory for the MITM CA + leaf cache (default ~/.relay-bridge)")
 	flag.BoolVar(&verbose, "v", false, "verbose: log each relayed request and which relay served it")
 	flag.Parse()
+	loadDotEnv() // pick up ./.env after flags, before reading env vars
 
 	if *secret == "" {
 		*secret = os.Getenv("RELAY_SECRET")
@@ -85,6 +86,36 @@ func main() {
 
 	// block forever
 	select {}
+}
+
+// loadDotEnv reads ./.env (if present) into the process environment WITHOUT
+// overriding variables already set (so pm2/real env wins). Format: KEY=value,
+// one per line; blank lines and # comments are ignored. Values are literal (no
+// interpolation). This lets the relay list live in a file while still honoring
+// env vars when running under pm2.
+func loadDotEnv() {
+	data, err := os.ReadFile(".env")
+	if err != nil {
+		return // no .env -> rely on existing environment
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		eq := strings.IndexByte(line, '=')
+		if eq < 0 {
+			continue
+		}
+		key := strings.TrimSpace(line[:eq])
+		val := strings.TrimSpace(line[eq+1:])
+		if key == "" {
+			continue
+		}
+		if _, ok := os.LookupEnv(key); !ok {
+			_ = os.Setenv(key, val)
+		}
+	}
 }
 
 // buildPool resolves the relay pool from either the -relay flag (single relay) or

@@ -35,6 +35,8 @@ Relay dikonfigurasi lewat environment. Ada **dua tipe**, dan satu proses memakai
 | `RELAY_SECRET` | opsional; dikirim sebagai `x-relay-secret`. |
 | `RELAY_URL` | mode single-legacy (dipakai jika `RELAY_TYPE` kosong). |
 
+> **Bisa via file `.env`:** binary juga auto-load `./.env` (dotenv) di direktori kerja saat start. Jadi kamu bisa isi `RELAY_TYPE` + `RELAY_VERCEL`/`RELAY_CLOUDFLARE` di `.env` (contoh di `.env.example`) dan langsung jalankan `./relay-bridge` tanpa export. **Env yang sudah diset (mis. oleh pm2) TIDAK ditimpa** oleh `.env` — pm2/ecosystem.config.js tetap menang.
+
 > **Aturan "tidak dicampur":** walau kedua daftar bisa dideklarasikan, hanya daftar yang cocok dengan `RELAY_TYPE` yang dimuat ke pool. Satu proses tidak akan pernah mencampur vercel & cloudflare. `RELAY_TYPE` yang tidak valid → exit 2 dengan pesan jelas.
 
 ## Cara kerja
