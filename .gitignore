@@ -1,30 +1,27 @@
+
 # binaries
-relay-bridge
-*.exe
-
-# MITM CA (private key must never be committed)
-.cert/
-**/mitm-ca.key
-**/mitm-ca.crt
-
-# build output
-/dist/
 /build/
-
-# vendored deps
-/vendor/
-
-# logs & runtime
-*.log
-nohup.out
-*.lock
-
-# env (copy .env.example; the real .env must not be committed)
+# build output
+.cert/
+/dist/
+.DS_Store
 .env
 .env.*
+# env (copy .env.example; the real .env must not be committed)
 !.env.example
-
-# OS / editor
-.DS_Store
+*.exe
+.hermes/
 .idea/
+*.lock
+*.log
+# logs & runtime
+**/mitm-ca.crt
+**/mitm-ca.key
+# MITM CA (private key must never be committed)
+nohup.out
+# OS / editor
+relay-bridge
+relay-bridge.old
+/vendor/
+# vendored deps
 .vscode/
