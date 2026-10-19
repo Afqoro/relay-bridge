@@ -52,7 +52,10 @@ x-relay-path:   /path?query         path + query destinasi
 x-relay-secret: <secret>            (opsional, hanya kalau dikonfigurasi)
 ```
 
-**Round-robin & failover:** `RelayPool` menyimpan daftar relay dari satu tipe. Setiap request memakai relay berikutnya secara bergiliran; jika satu relay gagal karena transport error (DNS/connect/timeout), pool mencoba relay berikutnya. HTTP error (4xx/5xx) dari origin **bukan** kegagalan — itu respons sah dan diteruskan apa adanya.
+**Round-robin & failover cerdas:** `RelayPool` menyimpan daftar relay dari satu tipe. Setiap request memakai relay berikutnya secara bergiliran.
+- Jika satu relay gagal karena transport error (DNS/connect/timeout), pool mencoba relay berikutnya.
+- **Failover otomatis pada HTTP 403 & 429:** Jika endpoint upstream AI (misal OpenCode Zen) membalas dengan `403 FreeTierError` (IP abuse detection) atau `429 FreeUsageLimitError` (rate limit), `relay-bridge` tidak melempar error ke klien, melainkan otomatis **failover ke node relay berikutnya** di pool secara transparan sampai request berhasil 200 OK.
+- *Catatan alternatif:* Selain serverless relay Vercel, proxy egress Cloudflare WARP lokal (`socks5://127.0.0.1:2323`) juga terbukti tembus 200 OK untuk membypass IP-level abuse upstream.
 
 ## Pasang
 
