@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -83,6 +84,18 @@ func (p *RelayPool) Forward(w http.ResponseWriter, clientReq *http.Request, sche
 			lastErr = err
 			continue
 		}
+
+		// Failover on upstream HTTP 403 (Abuse/Blocked) and 429 (Rate Limit):
+		// If a serverless relay node hits an IP-level abuse flag or rate limit from upstream,
+		// don't pass the 403/429 error directly to the client — failover immediately to the next relay!
+		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests {
+			respSnippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+			resp.Body.Close()
+			log.Printf("relay: %s returned HTTP %d (%s), failing over to next relay", r.Base, resp.StatusCode, string(respSnippet))
+			lastErr = fmt.Errorf("relay %s returned HTTP %d: %s", r.Base, resp.StatusCode, string(respSnippet))
+			continue
+		}
+
 		defer resp.Body.Close()
 		copyHeaders(w.Header(), resp.Header)
 		w.WriteHeader(resp.StatusCode)
