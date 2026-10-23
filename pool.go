@@ -11,12 +11,14 @@ import (
 
 // RelayPool is a set of relays of a single type (vercel OR cloudflare — never
 // both mixed). Depending on mode, incoming requests are either round-robined
-// across the relays ("round_robin") or always sent to the primary relay first
-// and failing over down the list on errors ("fallback").
+// across the relays ("round_robin") or handled via persistent active cursor
+// ("fallback"): requests stay on the currently active relay, and only shift
+// forward to the next relay when the active one fails.
 type RelayPool struct {
 	relays []*Relay
 	rr     atomic.Uint64
-	mode   string // "round_robin" or "fallback"
+	cursor atomic.Uint64 // active relay index for fallback mode
+	mode   string        // "round_robin" or "fallback"
 }
 
 // NewPool builds a pool from relay base URLs. Empty entries are skipped.
@@ -100,6 +102,9 @@ func (p *RelayPool) Forward(w http.ResponseWriter, clientReq *http.Request, sche
 	if p.Mode() == "round_robin" {
 		n := p.rr.Add(1) - 1
 		start = int(n % uint64(len(p.relays)))
+	} else {
+		// "fallback": start from currently active cursor
+		start = int(p.cursor.Load() % uint64(len(p.relays)))
 	}
 
 	var lastErr error
@@ -127,6 +132,13 @@ func (p *RelayPool) Forward(w http.ResponseWriter, clientReq *http.Request, sche
 			log.Printf("relay: %s returned HTTP %d (%s), failing over to next relay", r.Base, resp.StatusCode, string(respSnippet))
 			lastErr = fmt.Errorf("relay %s returned HTTP %d: %s", r.Base, resp.StatusCode, string(respSnippet))
 			continue
+		}
+
+		// On successful response in fallback mode, update cursor to this working relay
+		// so future requests go directly to this healthy node without hitting broken ones.
+		if p.Mode() == "fallback" && i > 0 {
+			p.cursor.Store(uint64(idx))
+			log.Printf("relay: active fallback cursor shifted to [%d] %s", idx+1, r.Base)
 		}
 
 		defer resp.Body.Close()

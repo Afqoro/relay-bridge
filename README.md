@@ -55,7 +55,7 @@ x-relay-secret: <secret>            (opsional, hanya kalau dikonfigurasi)
 
 **Mode Pool (`round_robin` vs `fallback`):**
 - **`round_robin` (default):** Setiap request baru memutar relay berikutnya secara bergiliran. Cocok untuk load balancing merata.
-- **`fallback` (active-backup):** Setiap request selalu dikirim ke relay pertama (Primary / indeks 0). Relay kedua, ketiga, dst hanya dipakai sebagai cadangan (failover) saat relay primary gagal (transport error atau HTTP 403/429).
+- **`fallback` (sticky active-cursor with failover):** Request diarahkan ke node aktif saat ini. Jika node A error (transport / 403 / 429), bridge otomatis fallback ke node B dan **menyimpan state memori aktif ke node B**. Request-request berikutnya akan langsung ke node B tanpa mencoba node A lagi (menghindari penambahan latency berulang). Node A baru akan dicoba kembali saat putaran daftar relay memutar kembali jika node-node setelahnya juga bermasalah.
 - Bisa diset lewat env `RELAY_MODE=fallback` (atau `POOL_MODE=fallback`) atau flag `-mode fallback`.
 
 **Failover otomatis:**
