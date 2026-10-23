@@ -111,14 +111,10 @@ func (p *RelayPool) Forward(w http.ResponseWriter, clientReq *http.Request, sche
 	for i := 0; i < len(p.relays); i++ {
 		idx := (start + i) % len(p.relays)
 		r := p.relays[idx]
-		if verbose {
-			log.Printf("relay: [%d/%d] %s <- %s %s://%s%s (mode=%s)", idx+1, len(p.relays), r.Base, clientReq.Method, scheme, host, targetPath, p.Mode())
-		}
+		log.Printf("relay: [%d/%d] %s <- %s %s://%s%s (mode=%s)", idx+1, len(p.relays), r.Base, clientReq.Method, scheme, host, targetPath, p.Mode())
 		resp, err := r.roundTrip(clientReq.Context(), clientReq.Method, body, clientReq.Header, scheme, host, targetPath)
 		if err != nil {
-			if verbose {
-				log.Printf("relay: %s failed (%v), trying next", r.Base, err)
-			}
+			log.Printf("relay: [%d/%d] %s failed (%v), trying next", idx+1, len(p.relays), r.Base, err)
 			lastErr = err
 			continue
 		}
@@ -145,6 +141,7 @@ func (p *RelayPool) Forward(w http.ResponseWriter, clientReq *http.Request, sche
 		copyHeaders(w.Header(), resp.Header)
 		w.WriteHeader(resp.StatusCode)
 		flushCopy(w, resp.Body)
+		log.Printf("relay: [%d/%d] %s -> %d %s (served %s %s://%s%s)", idx+1, len(p.relays), r.Base, resp.StatusCode, http.StatusText(resp.StatusCode), clientReq.Method, scheme, host, targetPath)
 		return
 	}
 	http.Error(w, "relay-bridge: all relays failed: "+lastErr.Error(), http.StatusBadGateway)
