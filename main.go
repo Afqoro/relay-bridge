@@ -128,9 +128,8 @@ func loadDotEnv() {
 }
 
 // buildPool resolves the relay pool from either the -relay flag (single relay) or
-// the environment: RELAY_TYPE selects "vercel" or "cloudflare", and the matching
-// RELAY_VERCEL / RELAY_CLOUDFLARE list is used. The two types are never mixed: a
-// single process always uses exactly one type's list.
+// the environment: RELAY_TYPE selects "vercel", "cloudflare", or "all" / "hybrid"
+// (which combines both lists into a single pool).
 func buildPool(relayFlag, secret, mode string) (*RelayPool, error) {
 	if relayFlag != "" {
 		return NewPoolWithMode([]string{relayFlag}, secret, mode), nil
@@ -141,26 +140,28 @@ func buildPool(relayFlag, secret, mode string) (*RelayPool, error) {
 		if u := os.Getenv("RELAY_URL"); u != "" {
 			return NewPoolWithMode([]string{u}, secret, mode), nil
 		}
-		return nil, fmt.Errorf("no relay configured: set -relay, RELAY_URL, or RELAY_TYPE=vercel|cloudflare with its RELAY_VERCEL/RELAY_CLOUDFLARE list")
+		return nil, fmt.Errorf("no relay configured: set -relay, RELAY_URL, or RELAY_TYPE=vercel|cloudflare|all with its RELAY_VERCEL/RELAY_CLOUDFLARE list")
 	}
 	switch relayType(rawType) {
 	case "vercel":
 		return newPoolFromEnv("RELAY_VERCEL", secret, mode)
 	case "cloudflare":
 		return newPoolFromEnv("RELAY_CLOUDFLARE", secret, mode)
+	case "all", "hybrid", "both", "mixed":
+		return newPoolHybrid(secret, mode)
 	default:
-		return nil, fmt.Errorf("invalid RELAY_TYPE %q: must be 'vercel' or 'cloudflare'", rawType)
+		return nil, fmt.Errorf("invalid RELAY_TYPE %q: must be 'vercel', 'cloudflare', or 'all'", rawType)
 	}
 }
 
-// relayType normalizes RELAY_TYPE: accepts "vercel"/"cloudflare" and also the
-// lenient forms "relay vercel"/"relay cloudflare". Returns "" if unrecognized.
+// relayType normalizes RELAY_TYPE: accepts "vercel"/"cloudflare"/"all" and also the
+// lenient forms "relay vercel"/"relay cloudflare"/"relay all". Returns "" if unrecognized.
 func relayType(s string) string {
 	t := strings.ToLower(strings.TrimSpace(s))
 	t = strings.TrimPrefix(t, "relay ")
 	t = strings.TrimSpace(t)
 	switch t {
-	case "vercel", "cloudflare":
+	case "vercel", "cloudflare", "all", "hybrid", "both", "mixed":
 		return t
 	}
 	return ""
@@ -182,6 +183,29 @@ func newPoolFromEnv(key, secret, mode string) (*RelayPool, error) {
 	p := NewPoolWithMode(strings.Split(raw, ","), secret, mode)
 	if p.Size() == 0 {
 		return nil, fmt.Errorf("env %s is empty: set a comma-separated relay list (e.g. %s=\"https://a,https://b\")", key, key)
+	}
+	return p, nil
+}
+
+func newPoolHybrid(secret, mode string) (*RelayPool, error) {
+	var bases []string
+	if rawVercel := os.Getenv("RELAY_VERCEL"); rawVercel != "" {
+		for _, b := range strings.Split(rawVercel, ",") {
+			if trimmed := strings.TrimSpace(b); trimmed != "" {
+				bases = append(bases, trimmed)
+			}
+		}
+	}
+	if rawCF := os.Getenv("RELAY_CLOUDFLARE"); rawCF != "" {
+		for _, b := range strings.Split(rawCF, ",") {
+			if trimmed := strings.TrimSpace(b); trimmed != "" {
+				bases = append(bases, trimmed)
+			}
+		}
+	}
+	p := NewPoolWithMode(bases, secret, mode)
+	if p.Size() == 0 {
+		return nil, fmt.Errorf("both RELAY_VERCEL and RELAY_CLOUDFLARE are empty: cannot build hybrid pool")
 	}
 	return p, nil
 }

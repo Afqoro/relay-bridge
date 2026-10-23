@@ -25,20 +25,20 @@ Relay itu sendiri adalah *catch-all HTTP relay*: kamu kirim request ke sana deng
 
 ## Konfigurasi relay (env)
 
-Relay dikonfigurasi lewat environment. Ada **dua tipe**, dan satu proses memakai **satu tipe saja** — tidak dicampur.
+Relay dikonfigurasi lewat environment. Kamu bisa memilih tipe relay spesifik (`vercel` atau `cloudflare`), ataupun menggabungkan keduanya (`all` / `hybrid`).
 
 | Env | Keterangan |
 |-----|-----------|
-| `RELAY_TYPE` | `vercel` \| `cloudflare` (juga menerima `relay vercel` / `relay cloudflare`). **Yang memilih tipe.** |
-| `RELAY_MODE` / `POOL_MODE` | `round_robin` (default) \| `fallback` (active-backup). **Mode routing pool.** |
-| `RELAY_VERCEL` | daftar relay Vercel, dipisah koma. Dipakai **hanya** jika `RELAY_TYPE=vercel`. |
-| `RELAY_CLOUDFLARE` | daftar relay Cloudflare Workers, dipisah koma. Dipakai **hanya** jika `RELAY_TYPE=cloudflare`. |
+| `RELAY_TYPE` | `vercel` \| `cloudflare` \| `all` (juga menerima `hybrid` / `both`). **Yang memilih tipe.** |
+| `RELAY_MODE` / `POOL_MODE` | `round_robin` (default) \| `fallback` (sticky active-cursor). **Mode routing pool.** |
+| `RELAY_VERCEL` | daftar relay Vercel, dipisah koma. Dipakai jika `RELAY_TYPE=vercel` atau `RELAY_TYPE=all`. |
+| `RELAY_CLOUDFLARE` | daftar relay Cloudflare Workers, dipisah koma. Dipakai jika `RELAY_TYPE=cloudflare` atau `RELAY_TYPE=all`. |
 | `RELAY_SECRET` | opsional; dikirim sebagai `x-relay-secret`. |
 | `RELAY_URL` | mode single-legacy (dipakai jika `RELAY_TYPE` kosong). |
 
-> **Bisa via file `.env`:** binary juga auto-load `./.env` (dotenv) di direktori kerja saat start. Jadi kamu bisa isi `RELAY_TYPE` + `RELAY_VERCEL`/`RELAY_CLOUDFLARE` di `.env` (contoh di `.env.example`) dan langsung jalankan `./relay-bridge` tanpa export. **Env yang sudah diset (mis. oleh pm2) TIDAK ditimpa** oleh `.env` — pm2/ecosystem.config.js tetap menang.
+> **Mode Gabungan (`RELAY_TYPE=all`):** Bila memilih `all`, daftar `RELAY_VERCEL` dan `RELAY_CLOUDFLARE` akan digabung menjadi satu pool (urutan: Vercel terlebih dahulu, lalu Cloudflare). Sangat efektif dipadukan dengan mode `RELAY_MODE=fallback` sebagai multi-provider redundancy.
 
-> **Aturan "tidak dicampur":** walau kedua daftar bisa dideklarasikan, hanya daftar yang cocok dengan `RELAY_TYPE` yang dimuat ke pool. Satu proses tidak akan pernah mencampur vercel & cloudflare. `RELAY_TYPE` yang tidak valid → exit 2 dengan pesan jelas.
+> **Bisa via file `.env`:** binary juga auto-load `./.env` (dotenv) di direktori kerja saat start. Jadi kamu bisa isi `RELAY_TYPE` + `RELAY_VERCEL`/`RELAY_CLOUDFLARE` di `.env` (contoh di `.env.example`) dan langsung jalankan `./relay-bridge` tanpa export. **Env yang sudah diset (mis. oleh pm2) TIDAK ditimpa** oleh `.env` — pm2/ecosystem.config.js tetap menang.
 
 ## Cara kerja
 

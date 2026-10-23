@@ -146,3 +146,32 @@ func TestRelayPoolModeRoundRobin(t *testing.T) {
 		t.Errorf("expected 2 calls each, got s1=%d, s2=%d", s1Calls.Load(), s2Calls.Load())
 	}
 }
+
+func TestBuildPoolHybrid(t *testing.T) {
+	t.Setenv("RELAY_TYPE", "all")
+	t.Setenv("RELAY_VERCEL", "https://v1.example.com,https://v2.example.com")
+	t.Setenv("RELAY_CLOUDFLARE", "https://cf1.example.com,https://cf2.example.com")
+
+	pool, err := buildPool("", "test-secret", "fallback")
+	if err != nil {
+		t.Fatalf("buildPool failed: %v", err)
+	}
+
+	if pool.Size() != 4 {
+		t.Fatalf("expected pool size 4, got %d", pool.Size())
+	}
+
+	bases := pool.Bases()
+	expected := []string{
+		"https://v1.example.com",
+		"https://v2.example.com",
+		"https://cf1.example.com",
+		"https://cf2.example.com",
+	}
+
+	for i, exp := range expected {
+		if bases[i] != exp {
+			t.Errorf("at index %d: expected %s, got %s", i, exp, bases[i])
+		}
+	}
+}
