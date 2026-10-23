@@ -17,6 +17,7 @@ var verbose bool
 func main() {
 	relayFlag := flag.String("relay", "", "single relay base URL (scheme://host) — overrides all env pool config")
 	secret := flag.String("secret", "", "optional x-relay-secret sent to the relay; also reads $RELAY_SECRET")
+	modeFlag := flag.String("mode", "", "routing mode: fallback (priority/failover) or round_robin (default); also reads $RELAY_MODE / $POOL_MODE")
 	httpListen := flag.String("http", "127.0.0.1:8080", "HTTP proxy listen address (empty disables)")
 	socksListen := flag.String("socks", "127.0.0.1:1080", "SOCKS5 listen address (empty disables)")
 	mitm := flag.Bool("mitm", false, "enable MITM HTTPS interception so browsers can load https:// via the relay (trust the CA in the client first)")
@@ -29,7 +30,15 @@ func main() {
 		*secret = os.Getenv("RELAY_SECRET")
 	}
 
-	pool, err := buildPool(*relayFlag, *secret)
+	mode := *modeFlag
+	if mode == "" {
+		mode = os.Getenv("RELAY_MODE")
+		if mode == "" {
+			mode = os.Getenv("POOL_MODE")
+		}
+	}
+
+	pool, err := buildPool(*relayFlag, *secret, mode)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error: "+err.Error())
 		os.Exit(2)
@@ -40,7 +49,7 @@ func main() {
 	}
 
 	// Log the pool config so it's obvious which type + relays are active.
-	log.Printf("relay pool: %d relay(s) for %s", pool.Size(), relayTypeLabel(*relayFlag))
+	log.Printf("relay pool: %d relay(s) for %s (mode: %s)", pool.Size(), relayTypeLabel(*relayFlag), pool.Mode())
 	for i, b := range pool.Bases() {
 		log.Printf("  [%d] %s", i+1, b)
 	}
@@ -122,23 +131,23 @@ func loadDotEnv() {
 // the environment: RELAY_TYPE selects "vercel" or "cloudflare", and the matching
 // RELAY_VERCEL / RELAY_CLOUDFLARE list is used. The two types are never mixed: a
 // single process always uses exactly one type's list.
-func buildPool(relayFlag, secret string) (*RelayPool, error) {
+func buildPool(relayFlag, secret, mode string) (*RelayPool, error) {
 	if relayFlag != "" {
-		return NewPoolWithSecret([]string{relayFlag}, secret), nil
+		return NewPoolWithMode([]string{relayFlag}, secret, mode), nil
 	}
 	rawType := os.Getenv("RELAY_TYPE")
 	if rawType == "" {
 		// Fall back to a single relay via RELAY_URL.
 		if u := os.Getenv("RELAY_URL"); u != "" {
-			return NewPoolWithSecret([]string{u}, secret), nil
+			return NewPoolWithMode([]string{u}, secret, mode), nil
 		}
 		return nil, fmt.Errorf("no relay configured: set -relay, RELAY_URL, or RELAY_TYPE=vercel|cloudflare with its RELAY_VERCEL/RELAY_CLOUDFLARE list")
 	}
 	switch relayType(rawType) {
 	case "vercel":
-		return newPoolFromEnv("RELAY_VERCEL", secret)
+		return newPoolFromEnv("RELAY_VERCEL", secret, mode)
 	case "cloudflare":
-		return newPoolFromEnv("RELAY_CLOUDFLARE", secret)
+		return newPoolFromEnv("RELAY_CLOUDFLARE", secret, mode)
 	default:
 		return nil, fmt.Errorf("invalid RELAY_TYPE %q: must be 'vercel' or 'cloudflare'", rawType)
 	}
@@ -168,9 +177,9 @@ func relayTypeLabel(relayFlag string) string {
 	return "single (RELAY_URL)"
 }
 
-func newPoolFromEnv(key, secret string) (*RelayPool, error) {
+func newPoolFromEnv(key, secret, mode string) (*RelayPool, error) {
 	raw := os.Getenv(key)
-	p := NewPoolWithSecret(strings.Split(raw, ","), secret)
+	p := NewPoolWithMode(strings.Split(raw, ","), secret, mode)
 	if p.Size() == 0 {
 		return nil, fmt.Errorf("env %s is empty: set a comma-separated relay list (e.g. %s=\"https://a,https://b\")", key, key)
 	}

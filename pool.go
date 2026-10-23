@@ -10,22 +10,31 @@ import (
 )
 
 // RelayPool is a set of relays of a single type (vercel OR cloudflare — never
-// both mixed). Incoming requests are round-robined across the relays, and a
-// transport failure on one relay falls over to the next.
+// both mixed). Depending on mode, incoming requests are either round-robined
+// across the relays ("round_robin") or always sent to the primary relay first
+// and failing over down the list on errors ("fallback").
 type RelayPool struct {
 	relays []*Relay
 	rr     atomic.Uint64
+	mode   string // "round_robin" or "fallback"
 }
 
 // NewPool builds a pool from relay base URLs. Empty entries are skipped.
 func NewPool(bases []string) *RelayPool {
-	return NewPoolWithSecret(bases, "")
+	return NewPoolWithMode(bases, "", "round_robin")
 }
 
 // NewPoolWithSecret builds a pool from relay base URLs, attaching the secret to
 // every relay. Empty entries are skipped.
 func NewPoolWithSecret(bases []string, secret string) *RelayPool {
-	p := &RelayPool{}
+	return NewPoolWithMode(bases, secret, "round_robin")
+}
+
+// NewPoolWithMode builds a pool with an explicit mode ("round_robin" or "fallback").
+func NewPoolWithMode(bases []string, secret, mode string) *RelayPool {
+	p := &RelayPool{
+		mode: normalizeMode(mode),
+	}
 	for _, b := range bases {
 		b = strings.TrimSpace(b)
 		if b == "" {
@@ -34,6 +43,24 @@ func NewPoolWithSecret(bases []string, secret string) *RelayPool {
 		p.relays = append(p.relays, NewRelay(b, secret))
 	}
 	return p
+}
+
+func normalizeMode(m string) string {
+	m = strings.ToLower(strings.TrimSpace(m))
+	switch m {
+	case "fallback", "failover", "priority":
+		return "fallback"
+	default:
+		return "round_robin"
+	}
+}
+
+// Mode returns the active routing mode ("round_robin" or "fallback").
+func (p *RelayPool) Mode() string {
+	if p.mode == "" {
+		return "round_robin"
+	}
+	return p.mode
 }
 
 // Size returns the number of relays in the pool.
@@ -48,8 +75,9 @@ func (p *RelayPool) Bases() []string {
 	return out
 }
 
-// Forward relays one client request through the pool. On a transport error the
-// next relay is tried (round-robin + failover).
+// Forward relays one client request through the pool. Depending on pool mode:
+// - "round_robin": requests rotate across relays; on failure, tries next.
+// - "fallback": requests always start at relay 0 (primary); only falls back to relay 1, 2... on failure.
 func (p *RelayPool) Forward(w http.ResponseWriter, clientReq *http.Request, scheme, host, targetPath string) {
 	if len(p.relays) == 0 {
 		http.Error(w, "relay-bridge: no relays configured", http.StatusBadGateway)
@@ -68,13 +96,18 @@ func (p *RelayPool) Forward(w http.ResponseWriter, clientReq *http.Request, sche
 		}
 	}
 
-	n := p.rr.Add(1) - 1
-	start := int(n % uint64(len(p.relays)))
+	start := 0
+	if p.Mode() == "round_robin" {
+		n := p.rr.Add(1) - 1
+		start = int(n % uint64(len(p.relays)))
+	}
+
 	var lastErr error
 	for i := 0; i < len(p.relays); i++ {
-		r := p.relays[(start+i)%len(p.relays)]
+		idx := (start + i) % len(p.relays)
+		r := p.relays[idx]
 		if verbose {
-			log.Printf("relay: %s <- %s %s://%s%s", r.Base, clientReq.Method, scheme, host, targetPath)
+			log.Printf("relay: [%d/%d] %s <- %s %s://%s%s (mode=%s)", idx+1, len(p.relays), r.Base, clientReq.Method, scheme, host, targetPath, p.Mode())
 		}
 		resp, err := r.roundTrip(clientReq.Context(), clientReq.Method, body, clientReq.Header, scheme, host, targetPath)
 		if err != nil {

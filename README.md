@@ -30,6 +30,7 @@ Relay dikonfigurasi lewat environment. Ada **dua tipe**, dan satu proses memakai
 | Env | Keterangan |
 |-----|-----------|
 | `RELAY_TYPE` | `vercel` \| `cloudflare` (juga menerima `relay vercel` / `relay cloudflare`). **Yang memilih tipe.** |
+| `RELAY_MODE` / `POOL_MODE` | `round_robin` (default) \| `fallback` (active-backup). **Mode routing pool.** |
 | `RELAY_VERCEL` | daftar relay Vercel, dipisah koma. Dipakai **hanya** jika `RELAY_TYPE=vercel`. |
 | `RELAY_CLOUDFLARE` | daftar relay Cloudflare Workers, dipisah koma. Dipakai **hanya** jika `RELAY_TYPE=cloudflare`. |
 | `RELAY_SECRET` | opsional; dikirim sebagai `x-relay-secret`. |
@@ -52,7 +53,12 @@ x-relay-path:   /path?query         path + query destinasi
 x-relay-secret: <secret>            (opsional, hanya kalau dikonfigurasi)
 ```
 
-**Round-robin & failover cerdas:** `RelayPool` menyimpan daftar relay dari satu tipe. Setiap request memakai relay berikutnya secara bergiliran.
+**Mode Pool (`round_robin` vs `fallback`):**
+- **`round_robin` (default):** Setiap request baru memutar relay berikutnya secara bergiliran. Cocok untuk load balancing merata.
+- **`fallback` (active-backup):** Setiap request selalu dikirim ke relay pertama (Primary / indeks 0). Relay kedua, ketiga, dst hanya dipakai sebagai cadangan (failover) saat relay primary gagal (transport error atau HTTP 403/429).
+- Bisa diset lewat env `RELAY_MODE=fallback` (atau `POOL_MODE=fallback`) atau flag `-mode fallback`.
+
+**Failover otomatis:**
 - Jika satu relay gagal karena transport error (DNS/connect/timeout), pool mencoba relay berikutnya.
 - **Failover otomatis pada HTTP 403 & 429:** Jika endpoint upstream AI (misal OpenCode Zen) membalas dengan `403 FreeTierError` (IP abuse detection) atau `429 FreeUsageLimitError` (rate limit), `relay-bridge` tidak melempar error ke klien, melainkan otomatis **failover ke node relay berikutnya** di pool secara transparan sampai request berhasil 200 OK.
 - *Catatan alternatif:* Selain serverless relay Vercel, proxy egress Cloudflare WARP lokal (`socks5://127.0.0.1:2323`) juga terbukti tembus 200 OK untuk membypass IP-level abuse upstream.
