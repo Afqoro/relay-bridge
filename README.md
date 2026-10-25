@@ -76,13 +76,14 @@ go build -o relay-bridge .
 ### Mode pool (multi-relay, via env)
 
 ```bash
-export RELAY_TYPE=vercel
+# Contoh mode gabungan (hybrid Vercel + Cloudflare) dengan failover active-backup:
+export RELAY_TYPE=all
+export RELAY_MODE=fallback
 export RELAY_VERCEL="https://relay-deployer-santo-...,https://relay-deployer-auah-fp850hnlh-...,https://relay-deployer-sengkyou-..."
 export RELAY_CLOUDFLARE="https://aurora8456-...,https://caleb05-...,https://salma31-..."
 
-./relay-bridge -http 127.0.0.1:8080 -socks 127.0.0.1:1080
-# verbose — log relay mana yang dipakai tiap request:
-./relay-bridge -http 127.0.0.1:8080 -socks 127.0.0.1:1080 -v
+./relay-bridge -http 127.0.0.1:8880 -socks 127.0.0.1:1180
+# Setiap request otomatis dicatat di log dengan URL relay aktif & status responsnya.
 ```
 
 ### Mode single (flag `-relay` atau `RELAY_URL`)
